@@ -153,7 +153,9 @@ keresés ma 0 találatot ad.
    - `.lighthouserc.json`: `categories:seo` vissza `warn`-ra vagy `error`-ra, a küszöböt
      a `LH_PRESET=desktop npm run audit:lighthouse https://returnolio.com` mért értékéből
    - `src/app/robots.test.ts` frissítése
-   - Deploy után ellenőrzés: `curl https://returnolio.com/robots.txt` (Allow /,
+   - Deploy után **Cloudflare cache purge** ("Purge Everything"), mert a robots.txt,
+     a sitemap és a HTML meta a CF edge-en cache-elve maradhat a régi, tiltó
+     tartalommal. Utána ellenőrzés: `curl https://returnolio.com/robots.txt` (Allow /,
      Sitemap sor), `curl -s https://returnolio.com | grep -i robots` (index, follow).
 3. **Cloudflare**: ellenőrizni, hogy a bot-fight / "Block AI scrapers" beállítás nem
    blokkolja a Googlebot/Bingbot-ot (a README szerint a datacenter IP-ket a CF challenge
@@ -192,7 +194,11 @@ keresés ma 0 találatot ad.
    képből vagy címből.
 6. **RSS feed**: `src/app/feed.xml/route.ts` a blog postokból. Kell az SEO-nak, a
    Beehiiv "RSS-to-send" automatizálásnak és az AI-crawlereknek is. `<link rel="alternate"
-   type="application/rss+xml">` a layoutba.
+   type="application/rss+xml">` a layoutba. **Figyelem**: a middleware matchere
+   kihagy minden pontot tartalmazó útvonalat, tehát a `/feed.xml`-t a `blogHidden`
+   blokk nem védi. A route-nak magának kell üres feedet adnia, amíg
+   `siteConfig.blogHidden` igaz, különben a placeholder posztok kiszivárognak a
+   feeden át a 10. PR előtt.
 7. **Lighthouse SEO kategória** visszakapcsolása a kapcsoló PR-ben (3. pont).
 
 ### Tartalmi
@@ -227,10 +233,13 @@ keresés ma 0 találatot ad.
    profit, value, momentum and insider activity."). Ugyanez szó szerint az
    `Organization.description`-ben, az `llms.txt`-ben és az About szekcióban. Az AI
    modellek a konzisztens, ismételt definíciót veszik át.
-4. **Docs oldalak markdown-változata**: `src/app/docs/[...slug]/page.md/route.ts`
-   (vagy `Accept: text/markdown` content negotiation a middleware-ben), ami a nyers
-   MDX-et adja vissza JSX nélkül. Az AI-keresők tisztább forrást kapnak, a `llms.txt`
-   erre linkeljen.
+4. **Docs oldalak markdown-változata**: egy `src/app/docs-md/[...slug]/route.ts`
+   route handler, ami a nyers MDX-et adja vissza JSX-komponensek nélkül
+   (`text/markdown`), plusz egy `next.config.ts` rewrite `/docs/:path*.md` →
+   `/docs-md/:path*`. (Egy segmentben nem lehet egyszerre `page.tsx` és `route.ts`,
+   ezért a külön prefix.) Az AI-keresők tisztább forrást kapnak, az `llms.txt` ezekre
+   linkeljen. A guardrail lint ide is fusson, mert a nyers MDX a szerzői kommenteket
+   is tartalmazza: a `{/* ... */}` blokkokat ki kell szűrni a válaszból.
 5. **Kérdés-válasz formátum**: minden methodology oldalon egy "Common questions"
    H2 alatt 3 rövid Q&A (H3 kérdés + 2 mondatos válasz) + `FAQPage` schema az adott
    oldalon. Ez az, amit a generatív keresők snippetként átvesznek.
@@ -261,12 +270,13 @@ Ez megmondja, hány feliratkozó gyűlt össze eddig. Ezeket importálni kell a 
    email + dátum + forrás, összesítő szám, CSV export gomb. `force-dynamic`. Tab
    felvétele az `admin/layout.tsx` `TABS` listájába.
 2. **Azonnali értesítés** minden új feliratkozásról: a `saveSignup` után egy
-   `notifySignup(email, list)` hívás. Opció A: Telegram bot (a webapp már használ
-   Telegram alertet a LAUNCH_CHECKLIST szerint, ugyanaz a bot token használható,
-   env `TELEGRAM_BOT_TOKEN`, `TELEGRAM_CHAT_ID`). Opció B: email a
-   `support@returnolio.com`-ra a webapp `SUPPORT_INGEST_URL` mintájára. **Javaslat: A**,
-   mert már van infrastruktúra és azonnal látható telefonon. Hiba esetén nem dobjon
-   500-at a felhasználónak (fire-and-forget, `console.error`).
+   `notifySignup(email, list)` hívás. Opció A: Telegram bot (env `TELEGRAM_BOT_TOKEN`,
+   `TELEGRAM_CHAT_ID`; **új infrastruktúra**, a LAUNCH_CHECKLIST Telegram-sorai
+   nyitott backlog-tételek, nem működő rendszer, ezt a self-review-ban javítottam).
+   Opció B: email a `support@returnolio.com`-ra a webapp `SUPPORT_INGEST_URL`
+   bridge-én át (ez létezik és működik). **Javaslat: A**, mert egy BotFather-lépés és
+   azonnal látható telefonon; B a fallback, ha nem akarsz új tokent kezelni. Hiba
+   esetén nem dobjon 500-at a felhasználónak (fire-and-forget, `console.error`).
 3. **Beehiiv továbbítás** (7. pont). A JSONL marad fallbackként és auditként.
 4. **Egy lista**: az `/api/newsletter` és `/api/waitlist` összevonása egy
    `/api/subscribe` route-ba `source` mezővel (`home-cta`, `blog-sidebar`, `docs-nudge`,
@@ -288,12 +298,15 @@ Ez megmondja, hány feliratkozó gyűlt össze eddig. Ezeket importálni kell a 
    (`news.returnolio.com` vagy `newsletter.returnolio.com`, Cloudflare DNS CNAME +
    DKIM/SPF rekordok a Beehiiv által megadott értékekkel).
 2. Settings → API → API key generálása; a Publication ID (`pub_…`) kimásolása.
-3. Titkok elhelyezése: **GitHub repo secrets** (`BEEHIIV_API_KEY`, `BEEHIIV_PUBLICATION_ID`)
-   ÉS a VPS-en a PM2 env-ben (`ecosystem.config.cjs` `env` blokk vagy `.env` fájl a
-   `/home/claudeuser/website`-ben), mert ezek **szerveroldali** (nem `NEXT_PUBLIC_`)
-   változók, a runtime-nak kellenek, nem a buildnek. A `deploy.yml` `.env.production`
-   lépése ma csak build-időset ír; Opus adjon hozzá egy rsync-elt `.env.runtime`
-   fájlt vagy dokumentálja, hogy a VPS-en kézzel kell beállítani.
+3. Titkok elhelyezése a VPS runtime környezetében, mert ezek **szerveroldali**
+   (nem `NEXT_PUBLIC_`) változók, a futó processznek kellenek, nem a buildnek.
+   **A repóból nem derül ki, hogyan jutnak ma a runtime titkok (`CF_API_TOKEN`,
+   `SUPPORT_INGEST_SECRET`) a VPS-re**: az `ecosystem.config.cjs` nem tartalmazza
+   őket, a `deploy.yml` nem rsync-el `.env` fájlt. Valószínűleg egy kézzel írt `.env`
+   ül a `/home/claudeuser/website`-ben (a rsync csak alkönyvtárakat töröl, a gyökér
+   fájlokat nem). Opus első dolga SSH-val megnézni (`ls -la /home/claudeuser/website/.env*`,
+   `pm2 env <id>`), és ugyanoda tenni a Beehiiv és Telegram kulcsokat, majd a README-ben
+   dokumentálni a mechanizmust. GitHub secretsbe csak akkor, ha a deploy is használja.
 4. Double opt-in: Beehiiv-ben eldönteni (EU/GDPR miatt ajánlott bekapcsolni).
 5. Welcome email megírása a Beehiiv-ben (az első automatikus levél).
 
@@ -303,6 +316,10 @@ Ez megmondja, hány feliratkozó gyűlt össze eddig. Ezeket importálni kell a 
    `{ email, reactivate_existing: true, send_welcome_email: true, utm_source: "returnolio.com", utm_medium: source }`,
    `Authorization: Bearer`. 10 s timeout, hibánál `throw`. Ha az env hiányzik,
    no-op + egyszeri warning (dev környezet).
+   **A mezőneveket emlékezetből írtam, a Beehiiv docs a tervezés alatt nem volt
+   elérhető (proxy blokkolta). Opus implementálás előtt ellenőrizze a
+   developers.beehiiv.com/api-reference/subscriptions/create oldalon**, különösen a
+   `send_welcome_email` és a `utm_*` mezők nevét és a rate limitet.
 2. `/api/subscribe` route: `await saveSignup(...)` (mindig), majd `beehiiv.subscribe`
    try/catch-ben. Válasz mindig 200, ha a JSONL mentés sikerült.
 3. **Backlog import script**: `scripts/import-signups-to-beehiiv.mjs` – beolvassa a
@@ -329,9 +346,10 @@ Ez megmondja, hány feliratkozó gyűlt össze eddig. Ezeket importálni kell a 
 placeholder), de **ki van kapcsolva** a `page.tsx`-ben ezzel az indokkal: "invented
 reviews are a blacklisted unfair practice under EU consumer law". Ez helytálló: az
 EU UCPD I. melléklet 23b-23c pontja (Omnibus irányelv, 2022 óta) kifejezetten tiltja
-a hamis fogyasztói véleményeket, és Magyarországon a GVH bírságol érte. A Paddle
-felülvizsgálat is nézi. Egy egyéni vállalkozó neve alatt futó oldalnál ez személyes
-kockázat.
+a hamis fogyasztói véleményeket; Magyarországon ez a fogyasztóvédelmi hatóság és a
+GVH hatásköre. A Paddle felülvizsgálat is nézi. Egy egyéni vállalkozó neve alatt
+futó oldalnál ez személyes kockázat. (Nem jogi tanács, a jogi átnézőnek érdemes
+feltenni.)
 
 **Ezért a terv: a szekció megépül és bekerül, OpenArt-képekkel, de a képek és a
 szövegek nem állítanak nem létező ügyfél-véleményt.** Ami mehet:
@@ -394,7 +412,11 @@ staging látja. A blog infrastruktúra (topic oldalak, related posts, sidebar, T
 4. **`BLOG_HIDDEN = false`** külön PR-ben, amikor legalább 4 poszt kész. Ezzel együtt:
    sitemap, RSS, nav "Blog" visszajön (automatikus a flag alapján).
 5. **Beehiiv RSS-to-send**: a `feed.xml`-t a Beehiiv automation olvassa, így minden
-   új poszt kimegy hírlevélként kézi munka nélkül.
+   új poszt kimegy hírlevélként kézi munka nélkül. **Ütközés**: a `newsletter-cta.tsx`
+   azt ígéri, "About one email a month". Ha minden poszt kimegy, ez az ígéret sérül.
+   Döntés kell: (a) RSS-to-send helyett havi digest a Beehiiv-ben, a posztok linkjeivel,
+   vagy (b) a copy módosítása "a few emails a month"-ra. Javaslat: (a), a havi Top 10
+   kiadással egy időben, mert az a márka ritmusa.
 6. **Szerző**: "Tamás" helyett teljes név + rövid bio + fotó (`author` mező bővítése
    objektummá a `blog.ts`-ben), mert az E-E-A-T (Google) és az AI-idézés is szerzőt
    keres. `Person` schema a `BlogPosting.author`-ban.
@@ -407,18 +429,20 @@ staging látja. A blog infrastruktúra (topic oldalak, related posts, sidebar, T
 Sorrend elve: előbb ami adatot veszít vagy szivárogtat, utána az SEO-alap, csak
 utána a láthatósági kapcsolók, végül a tartalom.
 
-| # | PR | Tartalom | Kapcsoló? |
-| --- | --- | --- | --- |
-| 1 | `fix/llms-txt-and-guardrail` | llms.txt súlyok ki + guardrail `public/`-ra | nem |
-| 2 | `feat/signups-admin-and-notify` | `/admin/signups`, Telegram értesítés, `/api/subscribe` összevonás, hook, tesztek | nem |
-| 3 | `feat/beehiiv` | `beehiiv.ts`, route bekötés, import script, blog sidebar élesítés | env kell (Tamás) |
-| 4 | `fix/links` | `/pricing` link, feedback endpoint, social linkek tisztítása, link-checker script + CI | nem |
-| 5 | `feat/seo-foundation` | per-oldal canonical, teljes sitemap, JSON-LD, RSS, OG képek docs+blog, www redirect, robots AI-botok | nem |
-| 6 | `feat/methodology-fomo` | MDX komponensek, 9 oldal átírás, shareLine, Q&A blokkok, by-the-numbers oldal, llms-full.txt | nem |
-| 7 | `feat/social-proof` | szekció adatvezérelt újraépítése, képslotok, visszakapcsolás a `page.tsx`-ben | igen (szekció) |
-| 8 | `content/blog-first-posts` | 6-7 poszt, placeholder törlés, szerző-objektum | nem |
-| 9 | `chore/search-visible` | `SEARCH_HIDDEN=false`, lighthouse seo on, robots teszt | **igen** |
-| 10 | `chore/blog-visible` | `BLOG_HIDDEN=false` | **igen** |
+| # | PR | Tartalom | Kapcsoló? | Méret |
+| --- | --- | --- | --- | --- |
+| 1 | `fix/llms-txt-and-guardrail` | llms.txt súlyok ki + guardrail `public/`-ra; a terv másolata `docs/plans/` alá, hogy a kóddal együtt éljen | nem | S (1 óra) |
+| 2 | `feat/signups-admin-and-notify` | `/admin/signups`, értesítés, `/api/subscribe` összevonás, hook, tesztek | nem | M (fél nap) |
+| 3 | `feat/beehiiv` | `beehiiv.ts`, route bekötés, import script, blog sidebar élesítés | env kell (Tamás) | M (fél nap + fiók) |
+| 4 | `fix/links` | `/pricing` link, feedback endpoint, social linkek tisztítása, link-checker script + CI | nem | M (fél nap) |
+| 5 | `feat/seo-foundation` | per-oldal canonical, teljes sitemap, JSON-LD, RSS, OG képek docs+blog, www redirect, robots AI-botok | nem | L (1 nap) |
+| 6 | `feat/methodology-fomo` | MDX komponensek, 9 oldal átírás, shareLine, Q&A blokkok, by-the-numbers oldal, llms-full.txt, md-változat | nem | L (1-2 nap) |
+| 7 | `feat/social-proof` | szekció adatvezérelt újraépítése, képslotok, visszakapcsolás a `page.tsx`-ben | igen (szekció) | M (fél nap + képek) |
+| 8 | `content/blog-first-posts` | 6-7 poszt, placeholder törlés, szerző-objektum | nem | L (1-2 nap + átnézés) |
+| 9 | `chore/search-visible` | `SEARCH_HIDDEN=false`, lighthouse seo on, robots teszt, CF purge | **igen** | S |
+| 10 | `chore/blog-visible` | `BLOG_HIDDEN=false` | **igen** | S |
+
+A 2. és 4. PR független az 5-6-tól, mehetnek párhuzamosan. A 9. az 5. után, a 10. a 8. után.
 
 A 9. és 10. PR csak akkor mehet, ha Tamás jelezte, hogy a jogi átnézés lezárult
 (vagy explicit vállalja nélküle). Minden PR-nél: `npm run lint`, `npm run lint:a11y`,
@@ -459,3 +483,35 @@ A 9. és 10. PR csak akkor mehet, ha Tamás jelezte, hogy a jogi átnézés lez�
    Ez a legerősebb horog, de egyben térkép is annak, aki reverse-engineerelni akar.
 8. **A `top-10-ideas-2026` placeholder** törölhető, vagy helyette egy "how the Top 10
    gets picked" teaser poszt kell ticker nélkül?
+
+---
+
+## 13. Self-review (2026-09-02, a terv első verziója után)
+
+Amit az első verzióban rosszul vagy ellenőrizetlenül állítottam, és itt javítottam:
+
+| # | Hiba az első verzióban | Javítás |
+| --- | --- | --- |
+| 1 | "A webapp már használ Telegram alertet, ugyanaz a token használható." Valótlan: a LAUNCH_CHECKLIST Telegram-sorai nyitott backlog-tételek. | 6.2: Telegram = új infra, email-bridge a meglévő fallback. |
+| 2 | Beehiiv API mezőnevek tényként leírva. A docs a proxy miatt nem volt elérhető, emlékezetből írtam. | 7. kód 1.: Opus a docs ellen ellenőrzi implementálás előtt. |
+| 3 | "PM2 env vagy `.env` a VPS-en" mint ismert mechanizmus. A repóból nem derül ki, hogyan jutnak a runtime titkok a szerverre. | 7.3: első lépés SSH-val kideríteni, és dokumentálni. |
+| 4 | Az RSS feed a middleware `blogHidden` blokkja alatt védettnek látszott. A matcher kihagyja a pontot tartalmazó útvonalakat, a feed védtelen. | 4.6: a route maga ellenőrzi a flaget. |
+| 5 | `page.md/route.ts` egy `page.tsx` mellett: nem lehetséges egy segmentben. | 5.4: külön `docs-md` prefix + rewrite. |
+| 6 | Az indexelés-kapcsoló után hiányzott a Cloudflare cache purge. A régi noindex HTML és robots.txt órákig kiszolgálható az edge-ről. | 3.2: purge a deploy után. |
+| 7 | Az RSS-to-send ütközik a "About one email a month" ígérettel a CTA-ban. | 9.5: havi digest javasolva, vagy copy-módosítás. |
+| 8 | "A GVH bírságol érte" mint tény. Nem ellenőriztem konkrét esetet. | 8.: hatáskörként fogalmazva, jogi tanács helyett a jogi átnézőnek továbbítva. |
+| 9 | Nem volt méretbecslés, így nem lehetett priorizálni. | 10.: S/M/L és párhuzamosíthatóság a táblában. |
+
+Amit ellenőriztem és állt:
+- A globális canonical (`layout.tsx:96`) tényleg minden oldalra a főoldalt adja; egyik `generateMetadata` sem ír `alternates`-t.
+- `/api/newsletter`-t semmi nem hívja a `src/` alatt; mindkét form a `/api/waitlist`-re megy.
+- Az `llms.txt` súlyai (25/35/20/20/0) benne vannak, és a guardrail `TARGET_DIRS` nem fedi a `public/`-ot.
+- A sitemap tényleg csak a `/docs` gyökeret listázza, a 38 aloldalt nem.
+- `SEARCH_HIDDEN = true` az egyetlen indexelés-kapcsoló; `STAGING` env prodon nincs beállítva a `ecosystem.config.cjs` szerint.
+
+Amit nem tudtam ellenőrizni, és Opusnak kell:
+- Hány feliratkozó van a `waitlist.jsonl`-ben (SSH kell).
+- A Beehiiv API pontos mezőnevei és rate limitje.
+- Hogyan kerülnek a runtime titkok a VPS-re.
+- Az app oldali ticker-útvonal (`/ticker/NVDA`?) a `<SeeItOnATicker>` deep-linkhez; a webapp repóból olvasandó ki.
+- Létezik-e a hat social profil.
