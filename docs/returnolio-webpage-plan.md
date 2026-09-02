@@ -672,3 +672,54 @@ React lint jogosan utasít vissza — kikerült a komponensből.
 `src/components/site/analytics-scripts.tsx`-ben (`react-hooks/set-state-in-effect`).
 Nem ehhez a branchhez tartozik, nem CI-gate, és a consent-logika átírása
 indoklás nélkül nagyobb kockázat, mint a hiba maga.
+
+---
+
+## 16. Az admin oldal visszabontása (2026-09-02, Tamás döntése)
+
+A `/admin/signups` tábla akkor épült, amikor **semmi** nem gyűjtötte a
+feliratkozókat: két cím ült egy JSONL fájlban a boxon, UI nélkül, értesítés
+nélkül, ESP nélkül. A tábla volt a leggyorsabb módja annak, hogy egyáltalán
+látszódjanak.
+
+Amint a Beehiiv be van kötve, ez az indok megszűnik. Ami marad, az egy **második
+hely, ahol a feliratkozókat nézni lehet** — egy lista, ami elcsúszik az
+igazitól, admin login mögött, kevesebbet mutatva, mint amit a Beehiiv amúgy is
+jobban mutat. Tamás döntése: menjen.
+
+**Ami megy**: `src/app/admin/signups/page.tsx`, a CSV export route, és a
+`Signups` tab az admin navigációból.
+
+**Ami marad, és miért**: a lemezre írás. Ez nem lista, hanem a biztonsági háló,
+ami miatt egy Beehiiv-kiesés, egy lecserélt kulcs vagy egy elgépelt publication
+id egy log sorba kerül és nem egy feliratkozóba. Az
+`import-signups-to-beehiiv.mjs` továbbra is ez alapján játssza vissza azt, ami
+nem ment át.
+
+**Amit pótolni kellett**: az oldal egyetlen olyan dolgot csinált, amit semmi más
+— megmutatta a hibát. Ha nincs ember, aki táblát néz, akkor a hibaágnak magának
+kell kiabálnia. Mindkettő (nincs konfigurálva / a Beehiiv visszautasította) most
+error szinten logol, kiírja a címet és megnevezi a scriptet, ami megjavítja:
+
+```
+npx pm2 logs returnolio-website | grep '\[subscribe\]'
+```
+
+### Plusz: „indexelhető-e az élő oldal" gate minden deployra
+
+Mind a három fatális ellenőrzés olyan állapotot fed le, ami ebben a projektben
+**már megtörtént élesben, miközben minden más zöld volt**: a `robots.txt`
+mindent tiltott, a sitemap három URL-t tartalmazott, és minden oldal a
+főoldal duplikátumának vallotta magát. Egyik sem töri el az oldalt — ezért nem
+fogta meg semmi; a site egyszerűen nem volt ott a Google-ben.
+
+A lépés a Cloudflare-t kérdezi (nem a buildet), tehát azt méri, amit egy crawler
+tényleg kap. Fatális: bare `Disallow: /`, `noindex` a főoldalon, 20 alatti
+sitemap. Jelzésértékű: nevesített crawlerek, RSS alternate, JSON-LD,
+`/llms.txt`, `/feed.xml`. A deploy **után** fut, tehát riasztó és nem fék.
+
+**Ellenőrzés**: a lépés shell-logikáját külön futtattam a helyi prod buildre
+(66 sitemap URL, robots 57 sor, canonical + RSS + JSON-LD megvan), és halott
+URL-ekkel `bash -e` alatt is — végigmegy minden ellenőrzésen, mindet kiírja, és
+1-gyel lép ki. A `Disallow: /` regexet külön unit-teszteltem, hogy a
+`Disallow: /admin` és `/api` ne buktassa el.
