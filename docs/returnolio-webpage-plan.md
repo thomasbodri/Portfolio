@@ -577,3 +577,73 @@ Amit nem tudtam ellenőrizni, és Opusnak kell:
 - Hogyan kerülnek a runtime titkok a VPS-re.
 - Az app oldali ticker-útvonal (`/ticker/NVDA`?) a `<SeeItOnATicker>` deep-linkhez; a webapp repóból olvasandó ki.
 - Létezik-e a hat social profil.
+
+---
+
+## 14. Mi valósult meg (Opus, 2026-09-02)
+
+A kivitelezés a `thomasbodri/returnolio-website` repóban, a
+`claude/returnolio-webpage-setup-0l9bfy` branchen. Nyolc commit, mind zöld
+(`npm test`, `tsc --noEmit`, `eslint --quiet`, guardrail, a11y, link lint,
+`next build`), és lokálisan végigfuttatva `next start`-tal.
+
+| Terv | Commit | Állapot |
+| --- | --- | --- |
+| 1. llms.txt + guardrail | `Stop llms.txt publishing the pillar weights` | kész |
+| 5. SEO-alap | `Give every page its own canonical…` | kész |
+| 2+3. Feliratkozók + Beehiiv | `Make the signups visible, and send them to Beehiiv` | kész, env kell |
+| 4. Linkek | `Check that internal links resolve…` | kész |
+| 6. Methodology FOMO + GEO | `Say what the methodology withholds…` | kész |
+| 8. Blog | `Write the blog` | kész, 7 valós poszt |
+| 10. Blog láthatóság | `Publish the blog` | kész |
+| 9. Indexelés | `Let search engines in` | kész |
+| — | `Tidy-up pass…` | önellenőrzés utáni javítások |
+| 7. Social proof | — | parkolva, Tamás döntése szerint |
+
+### Amit a terv nem tartalmazott, és menet közben derült ki
+
+- **`/docs/<kategória>` 404 volt.** A breadcrumb minden docs oldalon a
+  kategóriájára linkel, és `getDoc` csak kétszegmensű slugot fogad el. Most
+  kategória-hub oldalak vannak, benne a sitemapben is.
+- **`src/app/docs/page.tsx` recept-szivárgás**: "two of them carry no weight at
+  all". A guardrail nem látta, mert a `src/app` nem volt a scan alatt. Javítva.
+- **A dedupe substring-alapú volt** (`existing.includes('"' + email + '"')`),
+  tehát egy `a@b.com` némán elveszett volna egy meglévő `za@b.com` mögött.
+- **A Next nem enged metadata-image fájlt catch-all szegmensbe**, ezért a docs
+  OG kártya route handler lett (`/og/docs/[...slug]`), nem `opengraph-image.tsx`.
+- **A `docs-md` és az `llms-full.txt` `X-Robots-Tag: noindex`-et kapott**:
+  ugyanaz a szöveg második URL-en duplikátum, az AI crawlernek meg nem kell
+  hozzá az index.
+- **A dev PM2 instance ugyanabba a JSONL-be írt volna**, mint a prod (azonos
+  user, azonos home). Külön `SIGNUP_DATA_DIR`-t kapott.
+
+### Ami Tamásra vár (enélkül a rendszer működik, de féllábon)
+
+1. **Beehiiv fiók + publication + API key + Publication ID**, majd
+   `BEEHIIV_API_KEY` és `BEEHIIV_PUBLICATION_ID` a VPS *runtime* env-jébe (nem
+   build-time `.env.production`-be). Addig minden cím lementődik a lemezre
+   `skipped` státusszal, és az `/admin/signups` ezt egy sárga sávban kiírja.
+2. **`node scripts/import-signups-to-beehiiv.mjs --dry-run`**, elolvasni, majd
+   élesben lefuttatni: ez tolja fel a meglévő backlogot.
+3. **Deploy után Cloudflare cache purge.** A régi `Disallow: /` robots.txt és a
+   régi `noindex` HTML órákig kiszolgálható az edge-ről.
+4. **Cloudflare**: "Block AI bots" ki, verified botok engedve, `www` DNS a
+   tunnelre (a redirect kódban van, de csak akkor fut le, ha a kérés ideér).
+5. **Google Search Console + Bing Webmaster**: property, sitemap beküldés,
+   indexelés kérése a főoldalra, a `/docs`-ra, az `rtep-score`-ra, a
+   `backtest`-re és a `by-the-numbers`-re. A Bing nem opcionális: a ChatGPT
+   keresése azon fut.
+6. **`public/images/authors/thomas.webp`** (160×160). Amíg nincs, a
+   szerzőkártya monogramot mutat — a komponens fájl-létezést ellenőriz, nem
+   törött képet rak ki.
+7. **Blogposztok átolvasása.** Dátum mindegyiken 2026-09-02; ha ütemezve
+   mennének ki, csak a frontmatter `date` mezőt kell állítani.
+8. **Backlinkek**: app footer → returnolio.com és /docs, a hat social bio-ban a
+   domain, a Beehiiv hírlevél footerében is.
+
+### Egy dolog, ami nem ebben a repóban van
+
+A Returnolio MCP szerver `get_stock_score` tool leírása szó szerint ezt mondja:
+"Momentum and Smart Money shown as unweighted diagnostics". Ez pontosan az a
+recept-szivárgás, amit a guardrail a weboldalon tilt, csak a webapp/MCP repóban.
+Érdemes ott is átírni.
