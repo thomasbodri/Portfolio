@@ -647,3 +647,28 @@ A Returnolio MCP szerver `get_stock_score` tool leírása szó szerint ezt mondj
 "Momentum and Smart Money shown as unweighted diagnostics". Ez pontosan az a
 recept-szivárgás, amit a guardrail a weboldalon tilt, csak a webapp/MCP repóban.
 Érdemes ott is átírni.
+
+---
+
+## 15. Kritikus self-review a kód felett (Opus, 2026-09-02)
+
+Nem a tervet néztem újra, hanem a leírt kódot. Hat dolog jött elő, mind javítva
+a `Self-review: fix the feed link…` commitban.
+
+| # | Mi volt a baj | Hogyan derült ki | Javítás |
+| --- | --- | --- | --- |
+| 1 | **Az RSS `<link rel="alternate">` sehol nem jelent meg.** A Next mezőnként mergeli a metadatát, így egy oldal `alternates: { canonical }`-ja teljesen felülírja a layout `alternates` blokkját. A feed link pontosan azokra az oldalakra került volna, amelyeknek nincs canonicaljük — vagyis egyikre sem. | `curl … \| grep '<link rel="alternate"'` a főoldalon, egy docs oldalon és egy poszton: mind üres. Nem következtetés volt, hanem mérés. | `alternatesFor()` helper, ami a canonicalt és a feedet együtt adja. Minden oldal ezt használja. |
+| 2 | **A `scripts/` nincs rsyncelve a szerverre.** A deploy a `.next/`, `content/`, `public/` és négy manifest fájlt viszi ki. Az admin oldal viszont azt írja a kezelőnek, hogy futtassa a `scripts/import-signups-to-beehiiv.mjs`-t a boxon — ami nem lett volna ott. | A `deploy.yml` rsync-blokkjának végigolvasása. | `scripts/` felvéve az rsync listára. |
+| 3 | **`double_opt_override: "not_set"`** minden feliratkozás body-jában. Az elfogadott értékeket keresőtalálatból vettem, nem az élő doksiból; egy rossz enum **minden** feliratkozást 400-zal dobott volna vissza. | Végiggondoltam, mi történik, ha az egyetlen nem verifikált mező rossz. A várható kár aránytalan a haszonhoz. | A mező kivéve. Elhagyva a publication saját double opt-in beállítása érvényesül — pont az, amit akartunk tőle. |
+| 4 | Két route fájl importált egy harmadik route fájlból (`handleSubscribe` a `subscribe/route.ts`-ből). Működik, amíg a Next meg nem gondolja magát. | Kódolvasás. | `src/lib/subscribe-handler.ts`. |
+| 5 | `check-links.mjs` `import.meta.dirname`-et használt (Node 20.11+), a CI viszont `node-version: 20`-at kér, ami „valamelyik" 20.x. | Kódolvasás. | `fileURLToPath(import.meta.url)`. |
+| 6 | A sitemap `new Date(lastUpdated)`-et adott a Next-nek. Egy elrontott frontmatter dátum Invalid Date-et csinál, amin a `toISOString` elszáll — az egész sitemap odalenne egy elgépelés miatt. | Kódolvasás. | `safeDate()` guard. |
+
+Plusz két kisebb: a `docs-markdown.ts` árnyékolta a globális `unescape`-et
+(átnevezve), és az admin oldal a renderben olvasta az órát (`Date.now()`), amit a
+React lint jogosan utasít vissza — kikerült a komponensből.
+
+**Amit szándékosan nem javítottam**: egy meglévő eslint error a
+`src/components/site/analytics-scripts.tsx`-ben (`react-hooks/set-state-in-effect`).
+Nem ehhez a branchhez tartozik, nem CI-gate, és a consent-logika átírása
+indoklás nélkül nagyobb kockázat, mint a hiba maga.
