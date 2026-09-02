@@ -4,6 +4,18 @@ Készült: 2026-09-02. Tervező: Fable. Kivitelező: Opus.
 A terv a `thomasbodri/returnolio-website` repóra vonatkozik (a `thomasbodri/Portfolio`
 repo egy üres Next.js starter, nem a Returnolio oldal; lásd 0. pont).
 
+## Döntések Tamástól (2026-09-02, a 12. pont kérdéseire)
+
+| Kérdés | Döntés | Hatás a tervre |
+| --- | --- | --- |
+| Jogi kör | Lezárult. | Az indexelés-kapcsoló (9. PR) nem vár semmire, az 5. PR után azonnal mehet. |
+| Social proof | Egyelőre marad ki. | A 8. pont és a 7. PR parkolva; a `page.tsx` kommentelt import marad. |
+| Értesítés feliratkozáskor | Nem Telegram. A címek a Beehiiv-ben gyűljenek, free tierrel indul. | 6. és 7. pont átírva: Beehiiv az elsődleges gyűjtő, JSONL + `/admin/signups` a biztonsági háló. |
+| Social profilok | Mind a hat létezik. | Footer linkek maradnak; `sameAs` mind a hatot listázza, `twitter.com` → `x.com`. |
+| Szerző a blogon | "Thomas", kis avatar fotóval. Teljes név sehol. | 9.6 átírva. A frontmatter `author: "Tamás"` → `"Thomas"`. |
+| "Mit tartunk titokban" lista | Konkrétan nevezze meg. | 1.3 KeptInternal marad, ahogy le van írva. |
+| Placeholder posztok | Nem lehet placeholder, csak valós poszt. | 9.1: a `top-10-ideas-2026` törlés, a másik három teljes újraírás. A 10. PR csak akkor, ha minden poszt valós. |
+
 ---
 
 ## 0. Hol van a kód, és mi a kiindulási állapot
@@ -114,7 +126,7 @@ a VPS-en (OOM).
 | --- | --- | --- |
 | `content/blog/welcome-to-returnolio.mdx:43` | `/pricing` nem route | `/#pricing` |
 | `src/components/docs/was-this-helpful.tsx:116` | `/api/docs/feedback` nem létezik | route létrehozása (append JSONL a `website-data/docs-feedback.jsonl`-be, ugyanaz a minta mint `signup-store.ts`), vagy a widget eltávolítása |
-| `src/lib/site-config.ts:147-154` | social profilok létezése nem igazolt | Tamás megerősítése után a nem létezőket kivenni (halott social link a footerben rontja a bizalmat és az SEO-t) |
+| `src/lib/site-config.ts:147-154` | social profilok: Tamás megerősítette, mind a hat létezik | linkek maradnak; a `layout.tsx` `sameAs` mind a hatot listázza |
 | `src/app/layout.tsx:428` | `sameAs: twitter.com/returnolio` | a valós, létező profilok listája (x.com), lásd GEO |
 | `README.md`, `docs/LAUNCH_CHECKLIST.md` | `/about`, `/pricing` route-ként | anchor-ként javítani (dokumentációs hiba, de félrevezeti a következő fejlesztőt) |
 | `src/components/sections/social-proof.tsx` | Trustpilot placeholder | 5. pont |
@@ -264,20 +276,21 @@ ssh <deploy-user>@<hetzner> 'wc -l /home/claudeuser/website-data/*.jsonl; tail -
 ```
 Ez megmondja, hány feliratkozó gyűlt össze eddig. Ezeket importálni kell a Beehiiv-be.
 
-### Javítás (három réteg, mindegyik kell)
-1. **Admin nézet**: `src/app/admin/signups/page.tsx` (a `/admin/*` már Cloudflare Access
-   mögött van, csak a tulaj emailje engedett). Beolvassa mindkét JSONL-t, táblázat
-   email + dátum + forrás, összesítő szám, CSV export gomb. `force-dynamic`. Tab
-   felvétele az `admin/layout.tsx` `TABS` listájába.
-2. **Azonnali értesítés** minden új feliratkozásról: a `saveSignup` után egy
-   `notifySignup(email, list)` hívás. Opció A: Telegram bot (env `TELEGRAM_BOT_TOKEN`,
-   `TELEGRAM_CHAT_ID`; **új infrastruktúra**, a LAUNCH_CHECKLIST Telegram-sorai
-   nyitott backlog-tételek, nem működő rendszer, ezt a self-review-ban javítottam).
-   Opció B: email a `support@returnolio.com`-ra a webapp `SUPPORT_INGEST_URL`
-   bridge-én át (ez létezik és működik). **Javaslat: A**, mert egy BotFather-lépés és
-   azonnal látható telefonon; B a fallback, ha nem akarsz új tokent kezelni. Hiba
-   esetén nem dobjon 500-at a felhasználónak (fire-and-forget, `console.error`).
-3. **Beehiiv továbbítás** (7. pont). A JSONL marad fallbackként és auditként.
+### Javítás (Tamás döntése: a címek a Beehiiv-ben gyűljenek, nem Telegram)
+1. **Beehiiv az elsődleges gyűjtő** (7. pont): minden feliratkozás oda megy, ott
+   látszik az Audience listában, onnan megy a levél. A Beehiiv saját "new subscriber"
+   értesítése (Settings → Notifications, ha a free tier adja) helyettesíti a külön
+   értesítő csatornát.
+2. **Admin nézet mint biztonsági háló**: `src/app/admin/signups/page.tsx` (a `/admin/*`
+   már Cloudflare Access mögött van, csak a tulaj emailje engedett). Beolvassa mindkét
+   JSONL-t, táblázat email + dátum + forrás + "Beehiiv: ok / failed" státusz,
+   összesítő szám, **CSV export gomb Beehiiv-import formátumban** (email, utm_source,
+   created_at). `force-dynamic`. Tab felvétele az `admin/layout.tsx` `TABS` listájába.
+   Ez akkor is működik, ha a Beehiiv API nem elérhető vagy hibázik, és ez a kézi
+   import forrása.
+3. **JSONL marad**: a `saveSignup` mindig fut, a Beehiiv-hívás előtt. Bővítés: a rekord
+   kap egy `beehiiv: "ok" | "failed" | "skipped"` mezőt, hogy az admin oldal mutassa,
+   mit kell kézzel pótolni.
 4. **Egy lista**: az `/api/newsletter` és `/api/waitlist` összevonása egy
    `/api/subscribe` route-ba `source` mezővel (`home-cta`, `blog-sidebar`, `docs-nudge`,
    `gate`). A régi két útvonal 308-cal ide. A `coming-soon-gate.tsx` és a
@@ -293,22 +306,45 @@ Ez megmondja, hány feliratkozó gyűlt össze eddig. Ezeket importálni kell a 
 
 ## 7. Beehiiv bekötés
 
+### Free tier kockázat, előre tisztázandó
+Tamás a free (Launch) tierrel indul. **Emlékezetem szerint a Beehiiv API-hozzáférés
+csak a fizetős (Scale/Max) csomagokban van benne**, a free tier az embed formot és a
+hosted subscribe oldalt adja. Ezt a dokumentációt a tervezés alatt nem tudtam
+ellenőrizni (proxy). **Tamás a fiók létrehozása után nézze meg: Settings → API. Ha
+nincs "Create API key" gomb, a B-út megy.**
+
+- **A-út (van API)**: az alábbi kód-terv változatlan.
+- **B-út (nincs API a free tieren)**: a saját form marad (szebb, kész, a11y-ellenőrzött),
+  a `/api/subscribe` a JSONL-be ír, és a Beehiiv-be **két módon** kerülnek a címek:
+  1. a `/admin/signups` CSV-exportja → Beehiiv Audience → Import (kézi, hetente
+     egyszer, 1 perc), és
+  2. a blog sidebarba és a docs `<SubscribeNudge>`-ba a Beehiiv **embed form**
+     (iframe, `embeds.beehiiv.com`), ami közvetlenül a Beehiiv-be ír. Ehhez a
+     `next.config.ts` CSP `frame-src` bővítése `https://embeds.beehiiv.com`-mal.
+  A főoldali "Join us now" a saját form marad (a landing egységes kinézete miatt), a
+  Beehiiv-ből az embedes helyeken jön azonnal az adat, a főoldaliak a heti importtal.
+  Ha a projekt később fizetős tierre lép, az A-út egy env-változóval bekapcsol
+  (`beehiiv.ts` no-op → aktív), kód nem változik.
+
 ### Amit csak Tamás tud (Opus nem tud fiókot csinálni)
 1. Beehiiv fiók: beehiiv.com → publication "Returnolio" → custom domain beállítása
    (`news.returnolio.com` vagy `newsletter.returnolio.com`, Cloudflare DNS CNAME +
-   DKIM/SPF rekordok a Beehiiv által megadott értékekkel).
-2. Settings → API → API key generálása; a Publication ID (`pub_…`) kimásolása.
-3. Titkok elhelyezése a VPS runtime környezetében, mert ezek **szerveroldali**
+   DKIM/SPF rekordok a Beehiiv által megadott értékekkel). A free tieren a custom
+   sending domain is lehet, hogy nem elérhető; akkor a Beehiiv aldomain marad az elején.
+2. Settings → API → API key generálása, ha van; a Publication ID (`pub_…`) kimásolása.
+   Ha nincs API: Settings → Subscribe forms → embed kód kimásolása Opusnak.
+3. Settings → Notifications: "new subscriber" email értesítés bekapcsolása, ha van.
+4. Titkok elhelyezése a VPS runtime környezetében, mert ezek **szerveroldali**
    (nem `NEXT_PUBLIC_`) változók, a futó processznek kellenek, nem a buildnek.
    **A repóból nem derül ki, hogyan jutnak ma a runtime titkok (`CF_API_TOKEN`,
    `SUPPORT_INGEST_SECRET`) a VPS-re**: az `ecosystem.config.cjs` nem tartalmazza
    őket, a `deploy.yml` nem rsync-el `.env` fájlt. Valószínűleg egy kézzel írt `.env`
    ül a `/home/claudeuser/website`-ben (a rsync csak alkönyvtárakat töröl, a gyökér
    fájlokat nem). Opus első dolga SSH-val megnézni (`ls -la /home/claudeuser/website/.env*`,
-   `pm2 env <id>`), és ugyanoda tenni a Beehiiv és Telegram kulcsokat, majd a README-ben
+   `pm2 env <id>`), és ugyanoda tenni a Beehiiv kulcsokat, majd a README-ben
    dokumentálni a mechanizmust. GitHub secretsbe csak akkor, ha a deploy is használja.
-4. Double opt-in: Beehiiv-ben eldönteni (EU/GDPR miatt ajánlott bekapcsolni).
-5. Welcome email megírása a Beehiiv-ben (az első automatikus levél).
+5. Double opt-in: Beehiiv-ben eldönteni (EU/GDPR miatt ajánlott bekapcsolni).
+6. Welcome email megírása a Beehiiv-ben (az első automatikus levél).
 
 ### Kód (Opus)
 1. `src/lib/beehiiv.ts`: `subscribe({ email, source, utm })` →
@@ -333,15 +369,22 @@ Ez megmondja, hány feliratkozó gyűlt össze eddig. Ezeket importálni kell a 
 5. `docs/LAUNCH_CHECKLIST.md` Beehiiv sorának frissítése, README "Newsletter" szekció.
 
 ### Elfogadás
-- Feliratkozás a prod oldalon → 30 mp-en belül Telegram üzenet + a cím megjelenik a
-  Beehiiv Audience listában + egy sor a `waitlist.jsonl`-ben + látszik `/admin/signups`-on.
+- Feliratkozás a prod oldalon → a cím megjelenik a Beehiiv Audience listában + egy sor
+  a `waitlist.jsonl`-ben `beehiiv: "ok"` státusszal + látszik `/admin/signups`-on.
+- Beehiiv-hiba szimulálva (rossz kulcs) → a felhasználó továbbra is sikert lát, a sor
+  `beehiiv: "failed"` státuszú, az admin oldal pirossal mutatja.
 - Backlog import után a Beehiiv subscriber szám = JSONL egyedi címek száma.
 
 ---
 
-## 8. Social proof szekció
+## 8. Social proof szekció – PARKOLVA (Tamás döntése 2026-09-02)
 
-### Jelenlegi állapot és jogi keret
+Egyelőre nem készül. A szakasz alatti terv megmarad későbbre; a 7. PR törölve a
+sorrendből, a `page.tsx` kommentelt `SocialProof` importja marad, ahogy van. Ha
+később előkerül, a döntés a valós adatokra épülő változat és a kitalált idézetek
+között ugyanúgy Tamásé.
+
+### Jelenlegi állapot és jogi keret (referencia)
 `src/components/sections/social-proof.tsx` létezik (5 kép-placeholder + Trustpilot
 placeholder), de **ki van kapcsolva** a `page.tsx`-ben ezzel az indokkal: "invented
 reviews are a blacklisted unfair practice under EU consumer law". Ez helytálló: az
@@ -392,7 +435,10 @@ staging látja. A blog infrastruktúra (topic oldalak, related posts, sidebar, T
 
 ### Teendők
 1. **Placeholder törlése**: `top-10-ideas-2026.mdx` ki (a Top 10 fizetős, blogon nem
-   adunk ki tickereket, compliance). A másik három átírása valódi tartalomra.
+   adunk ki tickereket, compliance). A másik három **teljes** újraírása valódi
+   tartalomra; egyetlen "this is a placeholder" vagy kitalált szám sem maradhat.
+   Tamás döntése: placeholder nem mehet ki, csak valós poszt. A 10. PR (blog
+   láthatóvá tétele) elfogadási feltétele: `grep -ri "placeholder" content/blog` üres.
 2. **Első 6 poszt** (Opus írja, Tamás átnézi; mindegyik 900-1 400 szó, egy kulcsszó,
    2 docs-link, ShareBar, `shareLine` frontmatter):
    | Slug | Cím | Topic | Kulcsszó |
@@ -417,9 +463,15 @@ staging látja. A blog infrastruktúra (topic oldalak, related posts, sidebar, T
    Döntés kell: (a) RSS-to-send helyett havi digest a Beehiiv-ben, a posztok linkjeivel,
    vagy (b) a copy módosítása "a few emails a month"-ra. Javaslat: (a), a havi Top 10
    kiadással egy időben, mert az a márka ritmusa.
-6. **Szerző**: "Tamás" helyett teljes név + rövid bio + fotó (`author` mező bővítése
-   objektummá a `blog.ts`-ben), mert az E-E-A-T (Google) és az AI-idézés is szerzőt
-   keres. `Person` schema a `BlogPosting.author`-ban.
+6. **Szerző**: Tamás döntése: **"Thomas"**, teljes név nélkül, kis avatar fotóval.
+   A `blog.ts` `author` mezője objektum lesz (`{ name: "Thomas", avatar:
+   "/images/authors/thomas.webp", bio: "Founder of Returnolio. ..." }`), a meglévő
+   `author: "Tamás"` frontmatterek `"Thomas"`-ra cserélve. `Person` schema a
+   `BlogPosting.author`-ban `name: "Thomas"`, `url: siteConfig.url`. A "Returnolio
+   team" szerző is maradhat a nem-személyes posztokhoz. Az avatar: 160×160 WebP,
+   Tamás adja (fotó vagy OpenArt-illusztráció), `public/images/authors/` alá.
+   A teljes név egyedül a jogilag kötelező helyen (imprint, privacy) szerepel, ott
+   marad, ahogy van.
 7. **Blog OG kép** dinamikusan (`src/app/blog/[slug]/opengraph-image.tsx`).
 
 ---
@@ -437,52 +489,49 @@ utána a láthatósági kapcsolók, végül a tartalom.
 | 4 | `fix/links` | `/pricing` link, feedback endpoint, social linkek tisztítása, link-checker script + CI | nem | M (fél nap) |
 | 5 | `feat/seo-foundation` | per-oldal canonical, teljes sitemap, JSON-LD, RSS, OG képek docs+blog, www redirect, robots AI-botok | nem | L (1 nap) |
 | 6 | `feat/methodology-fomo` | MDX komponensek, 9 oldal átírás, shareLine, Q&A blokkok, by-the-numbers oldal, llms-full.txt, md-változat | nem | L (1-2 nap) |
-| 7 | `feat/social-proof` | szekció adatvezérelt újraépítése, képslotok, visszakapcsolás a `page.tsx`-ben | igen (szekció) | M (fél nap + képek) |
-| 8 | `content/blog-first-posts` | 6-7 poszt, placeholder törlés, szerző-objektum | nem | L (1-2 nap + átnézés) |
+| ~~7~~ | ~~`feat/social-proof`~~ | parkolva Tamás döntésére | – | – |
+| 8 | `content/blog-first-posts` | 6-7 valós poszt, placeholder törlés, szerző "Thomas" + avatar | nem | L (1-2 nap + átnézés) |
 | 9 | `chore/search-visible` | `SEARCH_HIDDEN=false`, lighthouse seo on, robots teszt, CF purge | **igen** | S |
-| 10 | `chore/blog-visible` | `BLOG_HIDDEN=false` | **igen** | S |
+| 10 | `chore/blog-visible` | `BLOG_HIDDEN=false`, feltétel: nincs placeholder | **igen** | S |
 
-A 2. és 4. PR független az 5-6-tól, mehetnek párhuzamosan. A 9. az 5. után, a 10. a 8. után.
-
-A 9. és 10. PR csak akkor mehet, ha Tamás jelezte, hogy a jogi átnézés lezárult
-(vagy explicit vállalja nélküle). Minden PR-nél: `npm run lint`, `npm run lint:a11y`,
-`node scripts/docs-guardrail-lint.cjs`, `npm test`, `npx next build` lokálisan zöld.
+**Javasolt sorrend a döntések után**: 1 → 5 → 9 (az indexelés a legnagyobb hatású és
+már nem vár semmire, három PR-rel elérhető) → 2 → 3 → 4 → 6 → 8 → 10. A 2. és 4.
+független az 5-6-tól, mehetnek párhuzamosan. A 3. Tamás Beehiiv-fiókjára vár.
+Minden PR-nél: `npm run lint`, `npm run lint:a11y`, `node scripts/docs-guardrail-lint.cjs`,
+`npm test`, `npx next build` lokálisan zöld.
 
 ---
 
 ## 11. Amit csak Tamás tud megcsinálni (fiókok, DNS, dashboardok)
 
-- [ ] Beehiiv fiók + publication + custom sending domain + API key + Publication ID
-- [ ] Titkok: `BEEHIIV_API_KEY`, `BEEHIIV_PUBLICATION_ID`, `TELEGRAM_BOT_TOKEN`,
-      `TELEGRAM_CHAT_ID` a GitHub secretsbe és a VPS runtime env-be
+- [ ] Beehiiv fiók (free tier) + publication; **megnézni, van-e API key a free tieren**
+      (7. pont A/B-út), és jelezni Opusnak
+- [ ] Ha van API: `BEEHIIV_API_KEY`, `BEEHIIV_PUBLICATION_ID` a VPS runtime env-be
+      (a mechanizmust Opus deríti ki, 7.4). Ha nincs: embed form kód Opusnak.
 - [ ] Google Search Console + Bing Webmaster property, sitemap beküldés (a 9. PR után)
-- [ ] Cloudflare: AI-bot blokkolás ki, verified bots engedve, `www` → apex redirect
-- [ ] Social profilok: melyik létezik (YouTube, TikTok, X, Instagram, Threads, Pinterest)
-- [ ] Trustpilot business profil
-- [ ] OpenArt képek a 8. pont specifikációja szerint
-- [ ] Jogi átnézés lezárása vagy döntés, hogy nélküle indexelünk
+- [ ] Cloudflare: AI-bot blokkolás ki, verified bots engedve, `www` → apex redirect,
+      cache purge a 9. PR deploy-ja után
+- [x] Social profilok: mind a hat létezik (Tamás, 2026-09-02)
+- [x] Jogi átnézés lezárult (Tamás, 2026-09-02)
 - [ ] Blog posztok átnézése és jóváhagyása publikálás előtt
-- [ ] Alapítói fotó + 2-3 mondatos bio a blog szerzőkártyához
+- [ ] "Thomas" avatar (160×160) + 2-3 mondatos bio a blog szerzőkártyához
+- ~~Trustpilot, OpenArt social-proof képek~~ parkolva a 8. ponttal
 
 ---
 
-## 12. Nyitott kérdések Tamásnak
+## 12. Kérdések és válaszok (lezárva 2026-09-02, lásd a dokumentum elején a döntéstáblát)
 
-1. **Jogi kör**: a `SEARCH_HIDDEN` kódkomment szerint az indexelés a jogi átnézésre
-   vár. Lezárult? Ha nem, indexeljünk nélküle? (Enélkül a 3. feladat nem teljesíthető.)
-2. **Social proof**: elfogadod a 8. pontban leírt, valós adatokra épülő változatot,
-   vagy ragaszkodsz kitalált ügyfél-idézetekhez? Utóbbit tudjuk építeni, de a jogi
-   kockázatot (UCPD 23b, GVH, Paddle) írásban vállalnod kell.
-3. **Értesítés csatorna** feliratkozáskor: Telegram (mint a webapp) vagy email?
-4. **Beehiiv sending domain**: `news.returnolio.com` jó?
-5. **Social profilok**: a hat footer-linkből melyik létezik ténylegesen?
-6. **Blog szerző**: teljes néven és fotóval jelenjen meg "Tamás Bodri" (E-E-A-T miatt
-   erősen ajánlott)?
-7. **Meddig FOMO**: a methodology oldalakon a "What stays internal" lista konkrétan
-   nevezze meg, mit nem adunk ki (súlyok, cut-off, fair-value választási szabály)?
-   Ez a legerősebb horog, de egyben térkép is annak, aki reverse-engineerelni akar.
-8. **A `top-10-ideas-2026` placeholder** törölhető, vagy helyette egy "how the Top 10
-   gets picked" teaser poszt kell ticker nélkül?
+1. Jogi kör: **lezárult.**
+2. Social proof: **parkolva.**
+3. Értesítés: **nem Telegram, Beehiiv-ben gyűljön.**
+4. Beehiiv sending domain: nyitva maradt, a free tieren lehet, hogy nem is választható.
+5. Social profilok: **mind a hat létezik.**
+6. Blog szerző: **"Thomas", avatar fotóval, teljes név nélkül.**
+7. KeptInternal lista: **konkrétan nevezze meg.**
+8. Placeholder poszt: **törlés, csak valós posztok.**
+
+Egyetlen nyitott pont Opus indulásához: **van-e API a Beehiiv free tieren** (7. pont).
+Ez csak a 3. PR-t érinti, a többi indulhat.
 
 ---
 
@@ -492,7 +541,7 @@ Amit az első verzióban rosszul vagy ellenőrizetlenül állítottam, és itt j
 
 | # | Hiba az első verzióban | Javítás |
 | --- | --- | --- |
-| 1 | "A webapp már használ Telegram alertet, ugyanaz a token használható." Valótlan: a LAUNCH_CHECKLIST Telegram-sorai nyitott backlog-tételek. | 6.2: Telegram = új infra, email-bridge a meglévő fallback. |
+| 1 | "A webapp már használ Telegram alertet, ugyanaz a token használható." Valótlan: a LAUNCH_CHECKLIST Telegram-sorai nyitott backlog-tételek. | Utóbb okafogyott: Tamás döntése szerint nincs külön értesítő csatorna, a Beehiiv gyűjt. |
 | 2 | Beehiiv API mezőnevek tényként leírva. A docs a proxy miatt nem volt elérhető, emlékezetből írtam. | 7. kód 1.: Opus a docs ellen ellenőrzi implementálás előtt. |
 | 3 | "PM2 env vagy `.env` a VPS-en" mint ismert mechanizmus. A repóból nem derül ki, hogyan jutnak a runtime titkok a szerverre. | 7.3: első lépés SSH-val kideríteni, és dokumentálni. |
 | 4 | Az RSS feed a middleware `blogHidden` blokkja alatt védettnek látszott. A matcher kihagyja a pontot tartalmazó útvonalakat, a feed védtelen. | 4.6: a route maga ellenőrzi a flaget. |
