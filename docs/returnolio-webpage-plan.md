@@ -306,15 +306,20 @@ Ez megmondja, hány feliratkozó gyűlt össze eddig. Ezeket importálni kell a 
 
 ## 7. Beehiiv bekötés
 
-### Free tier kockázat, előre tisztázandó
-Tamás a free (Launch) tierrel indul. **Emlékezetem szerint a Beehiiv API-hozzáférés
-csak a fizetős (Scale/Max) csomagokban van benne**, a free tier az embed formot és a
-hosted subscribe oldalt adja. Ezt a dokumentációt a tervezés alatt nem tudtam
-ellenőrizni (proxy). **Tamás a fiók létrehozása után nézze meg: Settings → API. Ha
-nincs "Create API key" gomb, a B-út megy.**
+### Free tier és API: ellenőrizve 2026-09-02 (webes keresés)
+Tamás a free (Launch) tierrel indul. **A Launch csomag tartalmazza az API-hozzáférést,
+a "Send API" kivételével** (források: beehiiv.com/pricing, a Beehiiv saját 2026-os
+pricing-cikke, több független review). A Send API a tranzakciós levélküldés, azt nem
+használjuk; a feliratkozás-létrehozó végpont (`subscriptions:write`) elérhető. A
+Launch limitje 2 500 feliratkozó és korlátlan küldés. Webhook csak Scale-től, de
+webhook nem kell a tervhez. A korábbi aggodalmam (API csak fizetős csomagban) elavult
+információ volt: az API régebben valóban fizetős volt, ma már minden csomagban benne van.
 
-- **A-út (van API)**: az alábbi kód-terv változatlan.
-- **B-út (nincs API a free tieren)**: a saját form marad (szebb, kész, a11y-ellenőrzött),
+**Tehát az A-út a fő út.** A B-út tartaléknak marad, ha a fiókban mégsem jelenik meg
+az API-kulcs (pl. régiós vagy csomag-változás miatt).
+
+- **A-út (API, ez megy)**: az alábbi kód-terv.
+- **B-út (tartalék)**: a saját form marad (szebb, kész, a11y-ellenőrzött),
   a `/api/subscribe` a JSONL-be ír, és a Beehiiv-be **két módon** kerülnek a címek:
   1. a `/admin/signups` CSV-exportja → Beehiiv Audience → Import (kézi, hetente
      egyszer, 1 perc), és
@@ -349,13 +354,19 @@ nincs "Create API key" gomb, a B-út megy.**
 ### Kód (Opus)
 1. `src/lib/beehiiv.ts`: `subscribe({ email, source, utm })` →
    `POST https://api.beehiiv.com/v2/publications/{id}/subscriptions` body:
-   `{ email, reactivate_existing: true, send_welcome_email: true, utm_source: "returnolio.com", utm_medium: source }`,
+   `{ email, reactivate_existing: false, send_welcome_email: true, utm_source: "returnolio.com", utm_medium: source, utm_campaign: "site-signup" }`,
    `Authorization: Bearer`. 10 s timeout, hibánál `throw`. Ha az env hiányzik,
    no-op + egyszeri warning (dev környezet).
-   **A mezőneveket emlékezetből írtam, a Beehiiv docs a tervezés alatt nem volt
-   elérhető (proxy blokkolta). Opus implementálás előtt ellenőrizze a
-   developers.beehiiv.com/api-reference/subscriptions/create oldalon**, különösen a
-   `send_welcome_email` és a `utm_*` mezők nevét és a rate limitet.
+   **Mezőnevek ellenőrizve 2026-09-02** a `developers.beehiiv.com/api-reference/subscriptions/create`
+   oldal keresőben indexelt tartalma alapján: `email` (kötelező), `reactivate_existing`
+   (bool, default false; csak tudatos újra-feliratkozásnál true, ezért a saját formon
+   **false** legyen, hogy leiratkozott embert ne aktiváljunk vissza), `send_welcome_email`
+   (bool, default false), `utm_source`, `utm_medium`, `utm_campaign` (string),
+   `double_opt_override` (`"on" | "off" | "not_set"`, a publication beállítását bírálja
+   felül; a saját formról `"not_set"`, azaz a Beehiiv-ben beállított double opt-in
+   érvényesül). A rate limitet nem találtam dokumentálva; a `beehiiv.ts` 429-re
+   egyszer, 2 s után próbáljon újra, utána `failed` státusz a JSONL-ben.
+   Auth: `Authorization: Bearer <API key>`. A Publication ID `pub_` előtagú.
 2. `/api/subscribe` route: `await saveSignup(...)` (mindig), majd `beehiiv.subscribe`
    try/catch-ben. Válasz mindig 200, ha a JSONL mentés sikerült.
 3. **Backlog import script**: `scripts/import-signups-to-beehiiv.mjs` – beolvassa a
@@ -504,10 +515,11 @@ Minden PR-nél: `npm run lint`, `npm run lint:a11y`, `node scripts/docs-guardrai
 
 ## 11. Amit csak Tamás tud megcsinálni (fiókok, DNS, dashboardok)
 
-- [ ] Beehiiv fiók (free tier) + publication; **megnézni, van-e API key a free tieren**
-      (7. pont A/B-út), és jelezni Opusnak
-- [ ] Ha van API: `BEEHIIV_API_KEY`, `BEEHIIV_PUBLICATION_ID` a VPS runtime env-be
-      (a mechanizmust Opus deríti ki, 7.4). Ha nincs: embed form kód Opusnak.
+- [ ] Beehiiv fiók (free Launch tier) + publication "Returnolio"; Settings → API →
+      API key létrehozása; Publication ID (`pub_…`) kimásolása. (Az API a free
+      tieren elérhető, ellenőrizve 2026-09-02.)
+- [ ] `BEEHIIV_API_KEY`, `BEEHIIV_PUBLICATION_ID` a VPS runtime env-be (a mechanizmust
+      Opus deríti ki, 7.4)
 - [ ] Google Search Console + Bing Webmaster property, sitemap beküldés (a 9. PR után)
 - [ ] Cloudflare: AI-bot blokkolás ki, verified bots engedve, `www` → apex redirect,
       cache purge a 9. PR deploy-ja után
@@ -530,8 +542,8 @@ Minden PR-nél: `npm run lint`, `npm run lint:a11y`, `node scripts/docs-guardrai
 7. KeptInternal lista: **konkrétan nevezze meg.**
 8. Placeholder poszt: **törlés, csak valós posztok.**
 
-Egyetlen nyitott pont Opus indulásához: **van-e API a Beehiiv free tieren** (7. pont).
-Ez csak a 3. PR-t érinti, a többi indulhat.
+A Beehiiv free tier API-kérdése lezárva (van, 7. pont): **nincs nyitott pont Opus
+indulásához.** A 3. PR-hez csak a fiók és a két env-érték kell Tamástól.
 
 ---
 
@@ -542,7 +554,8 @@ Amit az első verzióban rosszul vagy ellenőrizetlenül állítottam, és itt j
 | # | Hiba az első verzióban | Javítás |
 | --- | --- | --- |
 | 1 | "A webapp már használ Telegram alertet, ugyanaz a token használható." Valótlan: a LAUNCH_CHECKLIST Telegram-sorai nyitott backlog-tételek. | Utóbb okafogyott: Tamás döntése szerint nincs külön értesítő csatorna, a Beehiiv gyűjt. |
-| 2 | Beehiiv API mezőnevek tényként leírva. A docs a proxy miatt nem volt elérhető, emlékezetből írtam. | 7. kód 1.: Opus a docs ellen ellenőrzi implementálás előtt. |
+| 2 | Beehiiv API mezőnevek tényként leírva. A docs a proxy miatt nem volt elérhető, emlékezetből írtam. | Utóbb webes kereséssel ellenőrizve: a mezőnevek stimmeltek, `double_opt_override` került hozzá, `reactivate_existing` false-ra változott. |
+| 2b | "Az API csak fizetős Beehiiv csomagban van." Elavult: 2026-ban a free Launch tier is adja (Send API nélkül). | 7. pont: A-út a fő út, B-út tartalék. |
 | 3 | "PM2 env vagy `.env` a VPS-en" mint ismert mechanizmus. A repóból nem derül ki, hogyan jutnak a runtime titkok a szerverre. | 7.3: első lépés SSH-val kideríteni, és dokumentálni. |
 | 4 | Az RSS feed a middleware `blogHidden` blokkja alatt védettnek látszott. A matcher kihagyja a pontot tartalmazó útvonalakat, a feed védtelen. | 4.6: a route maga ellenőrzi a flaget. |
 | 5 | `page.md/route.ts` egy `page.tsx` mellett: nem lehetséges egy segmentben. | 5.4: külön `docs-md` prefix + rewrite. |
